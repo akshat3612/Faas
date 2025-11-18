@@ -18,10 +18,12 @@ functions = []
 class Function(BaseModel):
     id: str
     name: str
-    functionBody: str
+    functionCode: str
 
 
-@app.post("/function/", response_model=Function)
-async def create_item(function: Function):
+@app.post("/function/")
+async def run_function(function: Function):
+    print(function)
     functions.append(function)
-    return {"message": "Function registered successfully!"}
+    print(function.functionCode)
+    return exec(function.functionCode)
