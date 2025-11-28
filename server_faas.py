@@ -114,7 +114,7 @@ async def register_function(function: RequestFunction):
     # store in Redis
     try:
         r.set(redis_func_key, json.dumps(function_stored))
-        print(f"Registered {function_stored.name} with ID {function_stored.id}")
+        print(f"Registered {function_stored['name']} with ID {function_id}")        
         return {"function_id": function_id}
     except Exception as e:
         print(f"Redis function registration error: {e}")
