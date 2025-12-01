@@ -5,7 +5,7 @@
 -----
 Prerequisites
 ```
-pip install fastapi uvicorn dill
+pip install fastapi uvicorn dill redis
 ```
 ----
 
