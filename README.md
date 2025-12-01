@@ -5,7 +5,7 @@
 -----
 Prerequisites
 ```
-pip install fastapi uvicorn dill
+pip install fastapi uvicorn dill redis
 ```
 ----
 
@@ -37,3 +37,43 @@ uvicorn server:app --reload
 - Performance Evaluation
 - Creating Reports 
 - Running Tests
+
+
+### To run the Redis server
+
+```
+redis-server
+```
+
+```
+python3 -m uvicorn redis_faas:app --reload
+```
+
+In browser:
+```
+http://127.0.0.1:8000/
+```
+
+### To run client
+
+```
+python3 client_faas.py
+```
+
+I tested the connection first by:
+```
+http://127.0.0.1:8000/redis-test/testkey
+```
+
+Then by:
+```
+redis-cli set user:1 "Linn"
+```
+
+And the HTTP http://127.0.0.1:8000/redis-test/user:1 shows:
+```
+{
+  "key": "user:1",
+  "value": "Linn"
+}
+```
