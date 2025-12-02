@@ -4,7 +4,7 @@ import multiprocessing
 import dill
 import codecs
 
-DISPATCHER_ADDR = ""
+DISPATCHER_ADDR = "tcp://127.0.0.1:5555"
 
 # dill pickling
 def serialize(obj) -> str:
@@ -49,8 +49,8 @@ if __name__ == "__main__":
 
         if response == b"TASK":   # if dispatcher has task 
             task_id = msg[1].decode()
-            fn_payload = msg[2]
-            args_payload = msg[3]
+            fn_payload = msg[2].decode()
+            args_payload = msg[3].decode()
 
             print(f"Pull worker executing task {task_id}")
 

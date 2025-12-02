@@ -4,7 +4,7 @@ import multiprocessing
 import dill
 import codecs
 
-DISPATCHER_ADDR = ""
+DISPATCHER_ADDR = "tcp://127.0.0.1:5555"
 HEARTBEAT_INTERVAL = 3 #sedonds
 
 # dill pickling
@@ -19,6 +19,7 @@ def deserialize(s: str):
 # worker runs task
 def run_task(data):
     fn = deserialize(data["fn"])
+
     args = deserialize(data["args"])
     try:
         result = fn(*args)
@@ -49,8 +50,8 @@ if __name__ == "__main__":
 
             if msg_type == b"TASK":
                 task_id = payload[0].decode()
-                fn_payload = payload[1]
-                args_payload = payload[2]
+                fn_payload = payload[1].decode()
+                args_payload = payload[2].decode()
 
                 print(f"Push worker executing task {task_id}")
                 
