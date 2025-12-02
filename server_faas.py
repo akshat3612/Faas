@@ -8,27 +8,13 @@ from uuid import uuid4
 import uuid
 import json
 
-''' Fast API:
-- Connect to Redis
-- Define request/response models
-- Implement endpoints
-- Publish new tasks to Redis pub/sub
-'''
-
-'''
-Client Action (HTTP)	Service Endpoint	        Service Action (Redis)
-Register function	    /register_function (POST)	Service calls r.set()
-Execute function	    /execute_function (POST)	Service calls r.set() and r.publish()
-Get result	            /result/<task_id> (GET)	    Service calls r.get()
-'''
-
 r: redis.Redis = None 
 app = FastAPI()
 
 # dill pickling
 def serialize(obj) -> str:
     '''convert object to string w dill'''
-    return codecs.encode(dill.dumps(obj), "base64").decode()
+    return codecs.encode(dill.dumps(obj), "base64").decode().strip()
 
 def deserialize(s: str):
     '''convert base64 string back to object'''
@@ -99,22 +85,19 @@ async def register_function(function: RequestFunction):
 
     function_id = str(uuid4())
 
+    # store serialized function payload
     function_stored = {
-        "id": function.id,
-        "name": function.name,
-        "payload": function.payload,
-        "functionMethod": function.functionMethod,
-        "params": function.params
+        "payload": function.payload #dill func
     }
 
-    redis_func_key = function_id
-
     try:
-        r.set(redis_func_key, json.dumps(function_stored))
-        print(f"Registered {function_stored['name']} with ID {function_id}")        
+        r.set(function_id, json.dumps(function_stored))
+        print(f"Registered function with ID {function_id}")
         return {"function_id": function_id}
+
     except Exception as e:
-        print(f"Redis function registration error: {e}")
+        print("Redis function registration error:", e)
+        raise HTTPException(status_code=500, detail="Function registration failed")
 
 # execute a registered function through dispatcher/workers
 @app.post("/execute_function/")
@@ -122,38 +105,61 @@ async def execute_function(req: ExecuteFnReq):
 
     task_id = str(uuid4())
 
-    status_key = f"task:{task_id}:status"
-    fn_key = f"task:{task_id}:fn"
-    param_key = f"task:{task_id}:params"
+    # build unified task object
+    task_stored = {
+        "task_id": task_id,
+        "function_id": req.function_id,
+        "payload": req.payload,   # serialized args
+        "status": "QUEUED"
+    }
 
-    # store function payload and argument payload in Redis
-    r.set(status_key, "QUEUED")
-    r.set(fn_key, r.get(req.function_id))   # registered fn metadata
-    r.set(param_key, req.payload)   # serialized params
+    r.set(f"task:{task_id}", json.dumps(task_stored))
 
-    # publish task id to dispatcher
     r.publish("tasks", task_id)
 
     return {"task_id": task_id}
 
+
 # get result of executed task
 @app.get("/result/{task_id}")
 async def get_result(task_id: str):
-
-    status_key = f"task:{task_id}:status"
-    result_key = f"task:{task_id}:result"
-
-    status = r.get(status_key)
-    if status is None:
+    task_key = f"task:{task_id}"
+    task_raw = r.get(task_key)
+    
+    if task_raw is None:
         raise HTTPException(status_code=404, detail="Task not found")
-
+    
+    task = json.loads(task_raw)
+    status = task.get("status")
+    
+    # if task not done, report status
     if status != "COMPLETE":
         return {"task_id": task_id, "status": status}
-
-    raw = r.get(result_key)
-    result = deserialize(raw)
-
-    return {"task_id": task_id, "status": "COMPLETE", "result": result}
+    
+    result_raw = task.get("result")
+    
+    if result_raw is None:
+        return {
+            "task_id": task_id,
+            "status": "RUNNING"
+        }
+    
+    # clean and deserialize result
+    cleaned = result_raw.strip().replace("\n", "")
+    try:
+        result = deserialize(cleaned)
+    except Exception as e:
+        return {
+            "task_id": task_id,
+            "status": "FAILED",
+            "exception": f"Deserialization error: {e}"
+        }
+    
+    return {
+        "task_id": task_id,
+        "status": "COMPLETE",
+        "result": result
+    }
 
 # test redis get
 @app.get("/redis-test/{key}")

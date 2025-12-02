@@ -37,9 +37,9 @@ DEFAULT_ZMQ_PORT = 5555
 DEFAULT_NUM_WORKERS = 4
 
 # Fault tolerance settings
-TASK_DEADLINE_SECONDS = 2  # For pull mode
-HEARTBEAT_TIMEOUT_SECONDS = 1  # For push mode (workers send every 3s)
-HEARTBEAT_CHECK_INTERVAL = 0.5  # How often to check for dead workers
+TASK_DEADLINE_SECONDS = 5  # For pull mode
+HEARTBEAT_TIMEOUT_SECONDS = 3  # For push mode
+HEARTBEAT_CHECK_INTERVAL = 3  # How often to check for dead workers
 
 
 # Task States
@@ -53,7 +53,7 @@ class TaskStatus(str, Enum):
 # Serialization
 def serialize(obj) -> str:
     """Convert object to base64 string with dill"""
-    return codecs.encode(dill.dumps(obj), "base64").decode()
+    return codecs.encode(dill.dumps(obj), "base64").decode().strip()
 
 
 def deserialize(s: str):
@@ -384,6 +384,7 @@ class PullDispatcher(BaseDispatcher):
                 # Wait for worker request with timeout
                 if self.socket.poll(1000):  # 1 second timeout
                     msg = self.socket.recv_multipart()
+
                     msg_type = msg[0]
 
                     if msg_type == b"PULL_REQUEST":
