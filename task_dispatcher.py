@@ -12,37 +12,37 @@ from typing import Dict, Optional, Tuple
 from dataclasses import dataclass, field
 from enum import Enum
 
-"""
-Task Dispatcher for MPCSFaaS
 
-Responsible for:
-- Routing tasks from Redis to workers
-- Detecting failures
-- Updating Redis when results are available
+# Task Dispatcher for MPCSFaaS
 
-Modes:
-- local: Uses MultiProcessingPool for execution
-- pull: ZMQ REQ/REP pattern - workers request tasks
-- push: ZMQ DEALER/ROUTER pattern - dispatcher pushes tasks to workers
+# Responsible for:
+# - Routing tasks from Redis to workers
+# - Detecting failures
+# - Updating Redis when results are available
 
-Usage:
-    python3 task_dispatcher.py -m [local/pull/push] -p <port> -w <num_worker_processors>
-"""
+# Modes:
+# - local: Uses MultiProcessingPool for execution
+# - pull: ZMQ REQ/REP pattern - workers request tasks
+# - push: ZMQ DEALER/ROUTER pattern - dispatcher pushes tasks to workers
 
-# ============== Configuration ==============
+# Usage:
+#     python3 task_dispatcher.py -m [local/pull/push] -p <port> -w <num_worker_processors>
+
+
+# ============== Configurations ==============
 REDIS_HOST = "localhost"
 REDIS_PORT = 6379
 REDIS_TASKS_CHANNEL = "tasks"
 DEFAULT_ZMQ_PORT = 5555
 DEFAULT_NUM_WORKERS = 4
 
-# Fault tolerance settings
-TASK_DEADLINE_SECONDS = 5  # For pull mode
-HEARTBEAT_TIMEOUT_SECONDS = 2  # For push mode
+# fault tolerance settings
+TASK_DEADLINE_SECONDS = 5  # for pull mode
+HEARTBEAT_TIMEOUT_SECONDS = 2  # for push mode
 HEARTBEAT_CHECK_INTERVAL = 1  # How often to check for dead workers
 
 
-# Task States
+# task States
 class TaskStatus(str, Enum):
     QUEUED = "QUEUED"
     RUNNING = "RUNNING"
@@ -50,21 +50,19 @@ class TaskStatus(str, Enum):
     FAILED = "FAILED"
 
 
-# Serialization
+# serialization
 def serialize(obj) -> str:
-    """Convert object to base64 string with dill"""
     return codecs.encode(dill.dumps(obj), "base64").decode().strip()
 
 
 def deserialize(s: str):
-    """Convert base64 string back to object"""
     return dill.loads(codecs.decode(s.encode(), "base64"))
 
 
 # ============== Data Classes ==============
 @dataclass
+# track task execution state
 class TaskInfo:
-    """Track task execution state"""
 
     task_id: str
     worker_id: Optional[str] = None
@@ -74,8 +72,8 @@ class TaskInfo:
 
 
 @dataclass
+# track worker state for push mode
 class WorkerInfo:
-    """Track worker state for push mode"""
 
     worker_id: str
     last_heartbeat: float
@@ -84,47 +82,52 @@ class WorkerInfo:
 
 
 # ============== Redis Helper ==============
+# Helper class for Redis operations
 class RedisClient:
-    """Helper class for Redis operations"""
 
     def __init__(self, host: str = REDIS_HOST, port: int = REDIS_PORT):
         self.r = redis.Redis(host=host, port=port, decode_responses=True)
         self.r.ping()  # Verify connection
         print(f"Connected to Redis at {host}:{port}")
 
+    # gets task data from Redis
     def get_task(self, task_id: str) -> Optional[dict]:
-        """Get task data from Redis"""
+
         data = self.r.get(f"task:{task_id}")
         if data:
             return json.loads(data)
         return None
 
+    # get function data from Redis
     def get_function(self, function_id: str) -> Optional[dict]:
-        """Get function data from Redis"""
+
         data = self.r.get(function_id)
         if data:
             return json.loads(data)
         return None
 
+    # update task status in Redis
     def update_task_status(self, task_id: str, status: TaskStatus):
-        """Update task status in Redis"""
+
         task_data = self.get_task(task_id)
         if task_data:
             task_data["status"] = status.value
             self.r.set(f"task:{task_id}", json.dumps(task_data))
 
+    # update task with result
     def update_task_result(self, task_id: str, status: TaskStatus, result: str):
-        """Update task with result"""
+
         task_data = self.get_task(task_id)
         if task_data:
             task_data["status"] = status.value
             task_data["result"] = result
             self.r.set(f"task:{task_id}", json.dumps(task_data))
 
+    # get all tasks with QUEUED status (for pull mode polling)
     def get_queued_tasks(self) -> list:
-        """Get all tasks with QUEUED status (for pull mode polling)"""
+
         queued = []
-        # Scan for task keys
+        # scan for task keys
         for key in self.r.scan_iter("task:*"):
             task_data = self.r.get(key)
             if task_data:
@@ -135,20 +138,11 @@ class RedisClient:
 
 
 # ============== Local Execution ==============
+# Execute a task locally (for local mode and used by workers)
 def execute_task(
     task_id: str, fn_payload: str, param_payload: str
 ) -> Tuple[str, str, str]:
-    """
-    Execute a task locally (for local mode and used by workers)
 
-    Args:
-        task_id: UUID of the task
-        fn_payload: Serialized function
-        param_payload: Serialized parameters
-
-    Returns:
-        Tuple of (task_id, status, result_payload)
-    """
     try:
         fn = deserialize(fn_payload)
         params = deserialize(param_payload)
@@ -164,21 +158,21 @@ def execute_task(
         return (task_id, TaskStatus.COMPLETE.value, serialize(result))
 
     except Exception as e:
-        # Serialize the exception
         return (task_id, TaskStatus.FAILED.value, serialize(str(e)))
 
 
 # ============== Base Dispatcher ==============
+# base class for all dispatcher modes
 class BaseDispatcher:
-    """Base class for all dispatcher modes"""
 
     def __init__(self, redis_client: RedisClient):
         self.redis = redis_client
         self.running = True
         self.pending_tasks: Dict[str, TaskInfo] = {}  # task_id -> TaskInfo
 
+    # get function and args payloads for a task
     def get_task_payloads(self, task_id: str) -> Optional[Tuple[str, str]]:
-        """Get function and args payloads for a task"""
+
         task_data = self.redis.get_task(task_id)
         if not task_data:
             print(f"Task {task_id} not found in Redis")
@@ -196,28 +190,26 @@ class BaseDispatcher:
         return (fn_payload, args_payload)
 
     def handle_result(self, task_id: str, status: str, result_payload: str):
-        """Handle task completion"""
+
         task_status = TaskStatus.COMPLETE if status == "COMPLETE" else TaskStatus.FAILED
         self.redis.update_task_result(task_id, task_status, result_payload)
 
-        # Remove from pending
+        # remove from pending
         if task_id in self.pending_tasks:
             del self.pending_tasks[task_id]
 
         print(f"Task {task_id} completed with status: {status}")
 
     def start(self):
-        """Start the dispatcher - to be implemented by subclasses"""
         raise NotImplementedError
 
     def stop(self):
-        """Stop the dispatcher"""
         self.running = False
 
 
 # ============== Local Dispatcher ==============
+# Local mode using MultiProcessingPool
 class LocalDispatcher(BaseDispatcher):
-    """Local mode using MultiProcessingPool"""
 
     def __init__(
         self, redis_client: RedisClient, num_workers: int = DEFAULT_NUM_WORKERS
@@ -227,17 +219,17 @@ class LocalDispatcher(BaseDispatcher):
         self.pool = Pool(processes=num_workers)
         print(f"LocalDispatcher initialized with {num_workers} worker processes")
 
+    # callback on task completion
     def _on_task_complete(self, result: Tuple[str, str, str]):
-        """Callback when a task completes"""
         task_id, status, result_payload = result
         self.handle_result(task_id, status, result_payload)
 
+    # callback on pool execution failure
     def _on_task_error(self, error):
-        """Callback when pool execution fails"""
         print(f"Pool execution error: {error}")
 
+    # Dispatch task to process pool
     def dispatch_task(self, task_id: str):
-        """Dispatch a task to the process pool"""
         payloads = self.get_task_payloads(task_id)
         if not payloads:
             self.redis.update_task_result(
@@ -247,10 +239,10 @@ class LocalDispatcher(BaseDispatcher):
 
         fn_payload, args_payload = payloads
 
-        # Update status to RUNNING
+        # update status to RUNNING
         self.redis.update_task_status(task_id, TaskStatus.RUNNING)
 
-        # Track the task
+        # track the task
         self.pending_tasks[task_id] = TaskInfo(
             task_id=task_id,
             start_time=time.time(),
@@ -258,7 +250,7 @@ class LocalDispatcher(BaseDispatcher):
             args_payload=args_payload,
         )
 
-        # Submit to pool
+        # submit to pool
         self.pool.apply_async(
             execute_task,
             args=(task_id, fn_payload, args_payload),
@@ -268,8 +260,8 @@ class LocalDispatcher(BaseDispatcher):
 
         print(f"Task {task_id} dispatched to local pool")
 
+    # start listening for tasks on Redis pub/sub
     def start(self):
-        """Start listening for tasks on Redis pub/sub"""
         pubsub = self.redis.r.pubsub()
         pubsub.subscribe(REDIS_TASKS_CHANNEL)
 
@@ -298,12 +290,9 @@ class LocalDispatcher(BaseDispatcher):
 
 
 # ============== Pull Dispatcher ==============
+# Pull mode using ZMQ REQ/REP pattern
+# Workers request tasks, dispatcher responds with tasks or NO_TASK
 class PullDispatcher(BaseDispatcher):
-    """
-    Pull mode using ZMQ REQ/REP pattern
-
-    Workers request tasks, dispatcher responds with tasks or NO_TASK
-    """
 
     def __init__(
         self,
@@ -314,7 +303,7 @@ class PullDispatcher(BaseDispatcher):
         super().__init__(redis_client)
         self.port = port
         self.deadline = deadline
-        self.task_queue: list = []  # Tasks waiting to be assigned
+        self.task_queue: list = []  # tasks waiting to be assigned
         self.workers: Dict[str, float] = {}  # worker_id -> last_seen
 
         # ZMQ setup
@@ -324,13 +313,13 @@ class PullDispatcher(BaseDispatcher):
 
         print(f"PullDispatcher bound to tcp://*:{port}")
 
+    # background thread to check for deadline violations
     def _deadline_checker(self):
-        """Background thread to check for deadline violations"""
         while self.running:
             time.sleep(1)
             current_time = time.time()
 
-            # Check for timed out tasks
+            # check for timed out tasks
             timed_out = []
             for task_id, task_info in list(self.pending_tasks.items()):
                 if task_info.start_time and (
@@ -350,8 +339,8 @@ class PullDispatcher(BaseDispatcher):
                 )
                 del self.pending_tasks[task_id]
 
+    # background thread to listen for new tasks from Redis
     def _redis_listener(self):
-        """Background thread to listen for new tasks from Redis"""
         pubsub = self.redis.r.pubsub()
         pubsub.subscribe(REDIS_TASKS_CHANNEL)
 
@@ -368,9 +357,10 @@ class PullDispatcher(BaseDispatcher):
 
         pubsub.unsubscribe()
 
+    # start the pull dispatcher
     def start(self):
-        """Start the pull dispatcher"""
-        # Start background threads
+
+        # start background threads
         deadline_thread = threading.Thread(target=self._deadline_checker, daemon=True)
         deadline_thread.start()
 
@@ -391,7 +381,7 @@ class PullDispatcher(BaseDispatcher):
                         worker_id = msg[1].decode()
                         self.workers[worker_id] = time.time()
 
-                        # Check if we have a task to assign
+                        # check if we have a task to assign
                         if self.task_queue:
                             task_id = self.task_queue.pop(0)
                             payloads = self.get_task_payloads(task_id)
@@ -399,12 +389,12 @@ class PullDispatcher(BaseDispatcher):
                             if payloads:
                                 fn_payload, args_payload = payloads
 
-                                # Update status
+                                # update status
                                 self.redis.update_task_status(
                                     task_id, TaskStatus.RUNNING
                                 )
 
-                                # Track task
+                                # track task
                                 self.pending_tasks[task_id] = TaskInfo(
                                     task_id=task_id,
                                     worker_id=worker_id,
@@ -413,7 +403,7 @@ class PullDispatcher(BaseDispatcher):
                                     args_payload=args_payload,
                                 )
 
-                                # Send task to worker
+                                # send task to worker
                                 self.socket.send_multipart(
                                     [
                                         b"TASK",
@@ -424,7 +414,7 @@ class PullDispatcher(BaseDispatcher):
                                 )
                                 print(f"Sent task {task_id} to worker {worker_id}")
                             else:
-                                # Task/function not found
+                                # task/function not found
                                 self.socket.send_multipart([b"NO_TASK"])
                         else:
                             # No tasks available
@@ -437,7 +427,7 @@ class PullDispatcher(BaseDispatcher):
 
                         self.handle_result(task_id, status, result_payload)
 
-                        # Send ACK
+                        # send ACK
                         self.socket.send_multipart([b"ACK"])
 
         except KeyboardInterrupt:
@@ -451,12 +441,9 @@ class PullDispatcher(BaseDispatcher):
 
 
 # ============== Push Dispatcher ==============
+# Push mode using ZMQ DEALER/ROUTER pattern
+# Dispatcher pushes tasks to available workers
 class PushDispatcher(BaseDispatcher):
-    """
-    Push mode using ZMQ DEALER/ROUTER pattern
-
-    Dispatcher pushes tasks to available workers
-    """
 
     def __init__(
         self,
@@ -481,8 +468,8 @@ class PushDispatcher(BaseDispatcher):
 
         print(f"PushDispatcher bound to tcp://*:{port}")
 
+    # get available worker ID
     def _get_available_worker(self) -> Optional[str]:
-        """Get an available worker ID"""
         with self.lock:
             for worker_id, info in self.workers.items():
                 if info.is_available:
@@ -490,7 +477,6 @@ class PushDispatcher(BaseDispatcher):
         return None
 
     def _heartbeat_checker(self):
-        """Background thread to check for dead workers"""
         while self.running:
             time.sleep(HEARTBEAT_CHECK_INTERVAL)
             current_time = time.time()
@@ -519,13 +505,14 @@ class PushDispatcher(BaseDispatcher):
                         if task_id in self.pending_tasks:
                             del self.pending_tasks[task_id]
 
-                    # Remove worker
+                    # remove worker
                     del self.workers[worker_id]
                     if worker_id in self.worker_identities:
                         del self.worker_identities[worker_id]
 
+    # background thread to listen for new tasks from Redis
     def _redis_listener(self):
-        """Background thread to listen for new tasks from Redis"""
+
         pubsub = self.redis.r.pubsub()
         pubsub.subscribe(REDIS_TASKS_CHANNEL)
 
@@ -544,17 +531,18 @@ class PushDispatcher(BaseDispatcher):
 
         pubsub.unsubscribe()
 
+    # background thread to dispatch tasks to available workers
     def _task_dispatcher(self):
-        """Background thread to dispatch tasks to available workers"""
-        while self.running:
-            time.sleep(0.01)  # Small delay to avoid busy loop
 
-            # Try to dispatch queued tasks
+        while self.running:
+            time.sleep(0.01)  # small delay to avoid busy loop
+
+            # try to dispatch queued tasks
             with self.lock:
                 if not self.task_queue:
                     continue
 
-                # Find available worker
+                # find available worker
                 available_worker = None
                 for worker_id, info in self.workers.items():
                     if info.is_available:
@@ -564,14 +552,14 @@ class PushDispatcher(BaseDispatcher):
                 if not available_worker:
                     continue
 
-                # Get next task
+                # get next task
                 task_id = self.task_queue.pop(0)
 
-            # Dispatch task (outside lock)
+            # dispatch task (outside lock)
             self._dispatch_to_worker(task_id, available_worker)
 
     def _dispatch_to_worker(self, task_id: str, worker_id: str):
-        """Send a task to a specific worker"""
+
         payloads = self.get_task_payloads(task_id)
 
         if not payloads:
@@ -590,11 +578,11 @@ class PushDispatcher(BaseDispatcher):
 
             identity = self.worker_identities[worker_id]
 
-            # Mark worker as busy
+            # mark worker as busy
             self.workers[worker_id].is_available = False
             self.workers[worker_id].current_task = task_id
 
-            # Track task
+            # track task
             self.pending_tasks[task_id] = TaskInfo(
                 task_id=task_id,
                 worker_id=worker_id,
@@ -603,10 +591,10 @@ class PushDispatcher(BaseDispatcher):
                 args_payload=args_payload,
             )
 
-        # Update status
+        # update status
         self.redis.update_task_status(task_id, TaskStatus.RUNNING)
 
-        # Send task to worker
+        # send task to worker
         self.socket.send_multipart(
             [
                 identity,
@@ -619,9 +607,10 @@ class PushDispatcher(BaseDispatcher):
 
         print(f"Pushed task {task_id} to worker {worker_id}")
 
+    # start the push dispatcher
     def start(self):
-        """Start the push dispatcher"""
-        # Start background threads
+
+        # start background threads
         heartbeat_thread = threading.Thread(target=self._heartbeat_checker, daemon=True)
         heartbeat_thread.start()
 
@@ -664,7 +653,7 @@ class PushDispatcher(BaseDispatcher):
                         status = msg[3].decode()
                         result_payload = msg[4].decode()
 
-                        # Find which worker sent this
+                        # find which worker sent this
                         with self.lock:
                             for worker_id, wid in self.worker_identities.items():
                                 if wid == identity:
@@ -723,7 +712,7 @@ def main():
 
     args = parser.parse_args()
 
-    # Connect to Redis
+    # connect to Redis
     try:
         redis_client = RedisClient()
     except redis.exceptions.ConnectionError:
@@ -731,7 +720,7 @@ def main():
         print("Please ensure Redis is running: redis-server")
         return 1
 
-    # Create appropriate dispatcher
+    # create appropriate dispatcher
     if args.mode == "local":
         dispatcher = LocalDispatcher(redis_client, num_workers=args.workers)
     elif args.mode == "pull":
