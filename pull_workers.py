@@ -40,7 +40,11 @@ if __name__ == "__main__":
 
     context = zmq.Context()
     socket = context.socket(zmq.REQ)
+
+    socket.setsockopt(zmq.RCVTIMEO, 5000)   # 5 second timeout
     socket.connect(DISPATCHER_ADDR)
+
+    print(f"Pull worker {worker_id} connected to {DISPATCHER_ADDR}")
 
     pool = multiprocessing.Pool(processes=3)
 
@@ -60,7 +64,7 @@ if __name__ == "__main__":
             fn_payload = msg[2].decode().strip()  
             args_payload = msg[3].decode().strip()  
 
-            print(f"Pull worker executing task {task_id}")
+            print(f"Pull worker {worker_id} executing task {task_id}")
 
             status, result = run_task({"fn": fn_payload, "args": args_payload})
 
@@ -70,3 +74,4 @@ if __name__ == "__main__":
             # return result to dispatcher
             socket.send_multipart([b"PULL_RESULT", task_id.encode(), status.encode(), result.encode()])
             socket.recv()  # wait for ack
+            print(f"Pull task {task_id} completed with status: {status}")

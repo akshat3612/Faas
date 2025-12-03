@@ -5,7 +5,7 @@ import dill
 import codecs
 
 DISPATCHER_ADDR = "tcp://127.0.0.1:5555"
-HEARTBEAT_INTERVAL = 2  #seconds
+HEARTBEAT_INTERVAL = 0.2  #seconds
 
 # dill pickling
 def serialize(obj) -> str:
@@ -44,11 +44,11 @@ if __name__ == "__main__":
     socket = context.socket(zmq.DEALER)
     socket.connect(DISPATCHER_ADDR)
 
-    print(f"Worker {worker_id} connecting to {DISPATCHER_ADDR}")
+    print(f"Push worker {worker_id} connecting to {DISPATCHER_ADDR}")
 
     # register immediately
     socket.send_multipart([b"REGISTER", worker_id.encode()])
-    print(f"Worker {worker_id} registered")
+    print(f"Push worker {worker_id} registered")
 
     pool = multiprocessing.Pool(processes=3)  # concurrent tasks
     last_heartbeat = time.time()
@@ -67,7 +67,7 @@ if __name__ == "__main__":
                     fn_payload = msg[2].decode().strip()
                     args_payload = msg[3].decode().strip()
 
-                    print(f"Push worker executing task {task_id}")
+                    print(f"Push worker {worker_id} executing task {task_id}")
                     
                     # sends result back to dispatcher
                     def callback(result_tuple): 
