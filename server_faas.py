@@ -2,7 +2,7 @@ import dill
 import codecs
 import redis
 from pydantic import BaseModel
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, status
 from contextlib import asynccontextmanager
 from uuid import uuid4 
 import uuid
@@ -54,8 +54,9 @@ async def lifespan(app: FastAPI):
         r = redis.Redis(host=REDIS_HOST, port=REDIS_PORT, decode_responses=True)
         r.ping()
         print(f"Successfully connected to Redis at {REDIS_HOST}:{REDIS_PORT}")
-    except redis.exceptions.ConnectionError:
+    except redis.exceptions.ConnectionError as e:
         print(f"Could not connect to Redis at {REDIS_HOST}:{REDIS_PORT}")
+        print(f"Error: {e}")
         r = None 
 
     yield
@@ -83,6 +84,29 @@ async def root():
 @app.post("/register_function/")
 async def register_function(function: RequestFunction):
 
+    # redis connection
+    if r is None:
+        raise HTTPException(
+            status_code = status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Redis service is unavailable. Cannot register function."
+        )
+    
+    # payload not empty
+    if not function.payload or function.payload.strip() == "":
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Function payload cannot be empty"
+        )
+    
+    # payload is valid base64 serialized function
+    try:
+        deserialize(function.payload)
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Invalid function payload. Must be a valid base64-encoded serialized function. Error: {str(e)}"
+        )
+
     function_id = str(uuid4())
 
     # store serialized function payload
@@ -94,70 +118,171 @@ async def register_function(function: RequestFunction):
         r.set(function_id, json.dumps(function_stored))
         print(f"Registered function with ID {function_id}")
         return {"function_id": function_id}
+    except redis.exceptions.RedisError as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to register function in Redis: {str(e)}"
+        )
 
     except Exception as e:
-        print("Redis function registration error:", e)
-        raise HTTPException(status_code=500, detail="Function registration failed")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Unexpected error during function registration: {str(e)}"
+        )
+
 
 # execute a registered function through dispatcher/workers
-@app.post("/execute_function/")
+@app.post("/execute_function/", status_code=status.HTTP_202_ACCEPTED)
 async def execute_function(req: ExecuteFnReq):
-
+    # check redis connection
+    if r is None:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Redis service is unavailable. Cannot execute function."
+        )
+    
+    # validate format
+    try:
+        uuid.UUID(req.function_id)
+    except ValueError:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Invalid function_id format: '{req.function_id}'. Must be a valid UUID."
+        )
+    
+    # check if function exists
+    try:
+        function_data = r.get(req.function_id)
+        if function_data is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Function with ID '{req.function_id}' not found. Please register the function first."
+            )
+    except redis.exceptions.RedisError as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Error checking function existence in Redis: {str(e)}"
+        )
+    
+    # validate payload is not empty
+    if not req.payload or req.payload.strip() == "":
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Function arguments payload cannot be empty"
+        )
+    
+    # payload is valid base64 serialized arguments
+    try:
+        deserialize(req.payload)
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Invalid arguments payload. Must be valid base64-encoded serialized arguments. Error: {str(e)}"
+        )
+    
     task_id = str(uuid4())
-
-    # build unified task object
+    
     task_stored = {
         "task_id": task_id,
         "function_id": req.function_id,
-        "payload": req.payload,   # serialized args
+        "payload": req.payload,  # serialized args
         "status": "QUEUED"
     }
-
-    r.set(f"task:{task_id}", json.dumps(task_stored))
-
-    r.publish("tasks", task_id)
-
-    return {"task_id": task_id}
-
+    
+    try:
+        r.set(f"task:{task_id}", json.dumps(task_stored))
+        
+        # oublish after storing
+        r.publish("tasks", task_id)
+        
+        return {"task_id": task_id}
+    except redis.exceptions.RedisError as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to queue task in Redis: {str(e)}"
+        )
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Unexpected error during task execution: {str(e)}"
+        )
 
 # get result of executed task
 @app.get("/result/{task_id}")
 async def get_result(task_id: str):
+    # check redis connection
+    if r is None:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Redis service is unavailable. Cannot retrieve task result."
+        )
+    
+    # validate task_id
+    try:
+        uuid.UUID(task_id)
+    except ValueError:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Invalid task_id format: '{task_id}'. Must be a valid UUID."
+        )
+    
     task_key = f"task:{task_id}"
-    task_raw = r.get(task_key)
+    
+    try:
+        task_raw = r.get(task_key)
+    except redis.exceptions.RedisError as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Error retrieving task from Redis: {str(e)}"
+        )
     
     if task_raw is None:
-        raise HTTPException(status_code=404, detail="Task not found")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Task with ID '{task_id}' not found."
+        )
     
-    task = json.loads(task_raw)
-    status = task.get("status")
+    try:
+        task = json.loads(task_raw)
+    except json.JSONDecodeError as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Cannot parse JSON: {str(e)}"
+        )
     
-    # if task not done, report status
-    if status != "COMPLETE":
-        return {"task_id": task_id, "status": status}
+    status_val = task.get("status")
+    
+    if status_val is None:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Task data is missing 'status' field"
+        )
+    
+    # just report status if task not done
+    if status_val not in ["COMPLETE", "COMPLETED"]:
+        return {"task_id": task_id, "status": status_val}
     
     result_raw = task.get("result")
     
     if result_raw is None:
-        return {
-            "task_id": task_id,
-            "status": "RUNNING"
-        }
+        # complete but no result available
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Task marked as COMPLETE but result data is missing"
+        )
     
-    # clean and deserialize result
     cleaned = result_raw.strip().replace("\n", "")
     try:
         result = deserialize(cleaned)
     except Exception as e:
-        return {
-            "task_id": task_id,
-            "status": "FAILED",
-            "exception": f"Deserialization error: {e}"
-        }
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to deserialize task result: {str(e)}"
+        )
     
     return {
         "task_id": task_id,
-        "status": "COMPLETE",
+        "status": status_val,
         "result": result
     }
 
