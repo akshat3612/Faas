@@ -28,11 +28,11 @@ uvicorn server:app --reload
 
 ### TO-DO
 
-- Complete Client-Side
-- Implement Redis Caching [with UUID]
-- Implement Task Dispatcher
-- Implement Task Lifecycle
-- Implement Push-Pull Workers using ZMQ
+- Complete Client-Side [DONE]
+- Implement Redis Caching [with UUID] [DONE]
+- Implement Task Dispatcher [DONE]
+- Implement Task Lifecycle [DONE]
+- Implement Push-Pull Workers using ZMQ [DONE]
 - Brainstorm Fault Tolerance
 - Performance Evaluation
 - Creating Reports 
@@ -134,5 +134,5 @@ redis-cli
 
 - heartbeats between workers and dispatcher had to be aligned
 
-- kill push worker: Worker push-1764714319 missed heartbeat, marking as dead
-start again: Worker push-1764714387 registered
+- kill push worker:Worker push-1764714319 missed heartbeat, marking as dead
+start again:Worker push-1764714387 registered
