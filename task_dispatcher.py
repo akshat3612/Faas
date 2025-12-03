@@ -38,8 +38,8 @@ DEFAULT_NUM_WORKERS = 4
 
 # Fault tolerance settings
 TASK_DEADLINE_SECONDS = 5  # For pull mode
-HEARTBEAT_TIMEOUT_SECONDS = 3  # For push mode
-HEARTBEAT_CHECK_INTERVAL = 3  # How often to check for dead workers
+HEARTBEAT_TIMEOUT_SECONDS = 2  # For push mode
+HEARTBEAT_CHECK_INTERVAL = 1  # How often to check for dead workers
 
 
 # Task States
