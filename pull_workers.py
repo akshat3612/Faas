@@ -9,12 +9,10 @@ DISPATCHER_ADDR = "tcp://127.0.0.1:5555"
 
 # dill pickling
 def serialize(obj) -> str:
-    """convert object to string w dill"""
     return codecs.encode(dill.dumps(obj), "base64").decode().strip()
 
 
 def deserialize(s: str):
-    """convert base64 string back to object"""
     return dill.loads(codecs.decode(s.encode(), "base64"))
 
 
@@ -62,7 +60,7 @@ if __name__ == "__main__":
         response = msg[0]  # tasks or no tasks
 
         if response == b"NO_TASK":  # if dispatcher has no task
-            time.sleep(2)
+            time.sleep(0.2)
             continue
 
         if response == b"TASK":  # if dispatcher has task

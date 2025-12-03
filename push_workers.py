@@ -10,12 +10,10 @@ HEARTBEAT_INTERVAL = 0.2  # seconds
 
 # dill pickling
 def serialize(obj) -> str:
-    """convert object to string w dill"""
     return codecs.encode(dill.dumps(obj), "base64").decode().strip()
 
 
 def deserialize(s: str):
-    """convert base64 string back to object"""
     return dill.loads(codecs.decode(s.encode(), "base64"))
 
 
@@ -72,20 +70,18 @@ if __name__ == "__main__":
 
                     print(f"Push worker {worker_id} executing task {task_id}")
 
-                    # sends result back to dispatcher
-                    def callback(result_tuple):
+                    def callback(result_tuple, tid=task_id):  # Capture task_id here!
                         status, result = result_tuple
-                        # remove newlines from result
                         result = result.replace("\n", "")
                         socket.send_multipart(
                             [
                                 b"PUSH_RESULT",
-                                task_id.encode(),
+                                tid.encode(),  # Use tid instead of task_id
                                 status.encode(),
                                 result.encode(),
                             ]
                         )
-                        print(f"Task {task_id} completed with status: {status}")
+                        print(f"Task {tid} completed with status: {status}")
 
                     pool.apply_async(
                         run_task,
