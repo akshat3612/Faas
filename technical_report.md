@@ -67,15 +67,15 @@ As provided in the project description code, the Base64 encoding ensures safe tr
 ### Communication Protocols
 
 #### HTTP
-## Between Client and Server
+### Between Client and Server
 Communication between the client and server is handled through a simple RESTful API built with FastAPI, using JSON request and response bodies that contain base64-encoded function payloads. The system operates synchronously for clarity, and the client polls the server to retrieve task results.
 
 #### Redis Pub/Sub
-## Between Server and Dispatcher
+### Between Server and Dispatcher
 Communication between the server and the dispatcher is handled through Redis Pub/Sub. After the server stores a task in Redis, it publishes the task ID to the tasks channel, which the dispatcher is subscribed to. This setup fully decouples the server from the dispatcher and even allows multiple dispatchers to listen for and process tasks independently.
 
 #### ZeroMQ
-## Between Dispatcher and Workers
+### Between Dispatcher and Workers
 
 **Pull Mode (REQ/REP)**:
 In Pull Mode, workers actively request work from the dispatcher. Each worker begins by sending a PULL_REQUEST message containing its worker ID. The dispatcher replies with either a TASK message that includes the serialized function and arguments, or a NO_TASK message if no work is available. Once a worker completes a task, it returns the outcome to the dispatcher using a PULL_RESULT message, after which the dispatcher confirms receipt by sending back an ACK.
