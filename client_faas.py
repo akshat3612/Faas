@@ -22,13 +22,10 @@ def deserialize(s: str):
 def register_function(fn):
     serialized = serialize(fn)
     return requests.post(
-        f"{SERVER_URL}/register_function/",
+        f"{SERVER_URL}/register_function",
         json={
-            "id": "ignored",
             "name": fn.__name__,
             "payload": serialized,
-            "functionMethod": "python",
-            "params": [],
         },
     ).json()
 
@@ -37,14 +34,14 @@ def register_function(fn):
 def execute_function(fn_id, args):
     payload = serialize(args)
     return requests.post(
-        f"{SERVER_URL}/execute_function/",
+        f"{SERVER_URL}/execute_function",
         json={"function_id": fn_id, "payload": payload},
     ).json()
 
 
-# get status of a task (using result endpoint since status endpoint does not exist)
+# get status of a task
 def get_status(task_id):
-    return requests.get(f"{SERVER_URL}/result/{task_id}").json()
+    return requests.get(f"{SERVER_URL}/status/{task_id}").json()
 
 
 # get final result of a task
@@ -97,22 +94,29 @@ if __name__ == "__main__":
         if task_id:
             status = "QUEUED"
             print(f"Waiting for task {task_id} to complete")
-            while status not in ["COMPLETE", "FAILED"]:
-                time.sleep(1)
+            while status not in [
+                "COMPLETED",
+                "FAILED",
+            ]:
+                time.sleep(0.5)
                 status_response = get_status(task_id)
                 status = status_response.get("status", "UNKNOWN")
                 print(f"Current status: {status}")
 
             # get results
-            if status == "COMPLETE":
+            if status == "COMPLETED":
                 result_response = get_result(task_id)
-                final_result = result_response.get("result")
+                serialized_result = result_response.get("result")
+                # Deserialize the result
+                final_result = deserialize(serialized_result)
                 print(f"Task {task_id} completed. Result: {final_result}")
 
             elif status == "FAILED":
                 result_response = get_result(task_id)
-                exception_info = result_response.get("exception")
-                print(f"Task {task_id} failed: {exception_info}")
+                serialized_error = result_response.get("result")
+                # Deserialize the error
+                error_info = deserialize(serialized_error)
+                print(f"Task {task_id} failed: {error_info}")
 
     else:
         print("Could not get function_id")

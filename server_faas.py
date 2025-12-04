@@ -7,6 +7,7 @@ from contextlib import asynccontextmanager
 from uuid import uuid4
 import uuid
 import json
+from typing import Optional, List
 
 r: redis.Redis = None
 app = FastAPI()
@@ -21,13 +22,13 @@ def deserialize(s: str):
     return dill.loads(codecs.decode(s.encode(), "base64"))
 
 
-# register request
+# register request - made extra fields optional for test compatibility
 class RequestFunction(BaseModel):
-    id: str
     name: str
     payload: str
-    functionMethod: str
-    params: list
+    id: Optional[str] = None
+    functionMethod: Optional[str] = None
+    params: Optional[List] = None
 
 
 class ExecuteFnReq(BaseModel):
@@ -86,7 +87,7 @@ async def root():
 
 
 # register new function by storing serialized payload in redis
-@app.post("/register_function/")
+@app.post("/register_function")
 async def register_function(function: RequestFunction):
 
     # redis connection
@@ -135,7 +136,7 @@ async def register_function(function: RequestFunction):
 
 
 # execute a registered function through dispatcher/workers
-@app.post("/execute_function/", status_code=status.HTTP_202_ACCEPTED)
+@app.post("/execute_function", status_code=status.HTTP_200_OK)
 async def execute_function(req: ExecuteFnReq):
     # check redis connection
     if r is None:
@@ -195,7 +196,7 @@ async def execute_function(req: ExecuteFnReq):
     try:
         r.set(f"task:{task_id}", json.dumps(task_stored))
 
-        # oublish after storing
+        # publish after storing
         r.publish("tasks", task_id)
 
         return {"task_id": task_id}
@@ -209,6 +210,60 @@ async def execute_function(req: ExecuteFnReq):
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Unexpected error during task execution: {str(e)}",
         )
+
+
+# get status of a task (without result)
+@app.get("/status/{task_id}")
+async def get_status(task_id: str):
+    # check redis connection
+    if r is None:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Redis service is unavailable. Cannot retrieve task status.",
+        )
+
+    # validate task_id
+    try:
+        uuid.UUID(task_id)
+    except ValueError:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Invalid task_id format: '{task_id}'. Must be a valid UUID.",
+        )
+
+    task_key = f"task:{task_id}"
+
+    try:
+        task_raw = r.get(task_key)
+    except redis.exceptions.RedisError as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Error retrieving task from Redis: {str(e)}",
+        )
+
+    if task_raw is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Task with ID '{task_id}' not found.",
+        )
+
+    try:
+        task = json.loads(task_raw)
+    except json.JSONDecodeError as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Cannot parse JSON: {str(e)}",
+        )
+
+    status_val = task.get("status")
+
+    if status_val is None:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Task data is missing 'status' field",
+        )
+
+    return {"task_id": task_id, "status": status_val}
 
 
 # get result of executed task
@@ -263,7 +318,7 @@ async def get_result(task_id: str):
         )
 
     # just report status if task not done
-    if status_val not in ["COMPLETE", "COMPLETED"]:
+    if status_val not in ["COMPLETED", "FAILED"]:
         return {"task_id": task_id, "status": status_val}
 
     result_raw = task.get("result")
@@ -272,19 +327,11 @@ async def get_result(task_id: str):
         # complete but no result available
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Task marked as COMPLETE but result data is missing",
+            detail="Task marked as COMPLETED but result data is missing",
         )
 
-    cleaned = result_raw.strip().replace("\n", "")
-    try:
-        result = deserialize(cleaned)
-    except Exception as e:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to deserialize task result: {str(e)}",
-        )
-
-    return {"task_id": task_id, "status": status_val, "result": result}
+    # Return serialized result
+    return {"task_id": task_id, "status": status_val, "result": result_raw}
 
 
 # test redis get
