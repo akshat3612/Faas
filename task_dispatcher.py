@@ -147,8 +147,16 @@ def execute_task(
         fn = deserialize(fn_payload)
         params = deserialize(param_payload)
 
-        # Execute the function
-        if isinstance(params, tuple):
+        if (
+            isinstance(params, tuple)
+            and len(params) == 2
+            and isinstance(params[0], tuple)
+            and isinstance(params[1], dict)
+        ):
+            args_tuple, kwargs_dict = params
+            result = fn(*args_tuple, **kwargs_dict)
+        # Execute the function - perf_eval format
+        elif isinstance(params, tuple):
             result = fn(*params)
         elif isinstance(params, dict):
             result = fn(**params)
@@ -191,7 +199,9 @@ class BaseDispatcher:
 
     def handle_result(self, task_id: str, status: str, result_payload: str):
 
-        task_status = TaskStatus.COMPLETE if status == "COMPLETE" else TaskStatus.FAILED
+        task_status = (
+            TaskStatus.COMPLETE if status == "COMPLETED" else TaskStatus.FAILED
+        )
         self.redis.update_task_result(task_id, task_status, result_payload)
 
         # remove from pending

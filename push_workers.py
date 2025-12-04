@@ -23,8 +23,16 @@ def run_task(data):
     args = deserialize(data["args"])
 
     try:
-        # handle different argument types
-        if isinstance(args, tuple):
+        if (
+            isinstance(args, tuple)
+            and len(args) == 2
+            and isinstance(args[0], tuple)
+            and isinstance(args[1], dict)
+        ):
+            args_tuple, kwargs_dict = args
+            result = fn(*args_tuple, **kwargs_dict)
+        # handle different argument types - perf_eval format
+        elif isinstance(args, tuple):
             result = fn(*args)
         elif isinstance(args, dict):
             result = fn(**args)
@@ -32,14 +40,14 @@ def run_task(data):
             # single arg
             result = fn(args)
 
-        return ("COMPLETE", serialize(result))
+        return ("COMPLETED", serialize(result))
     except Exception as e:
         return ("FAILED", serialize(str(e)))
 
 
 if __name__ == "__main__":
 
-    worker_id = f"push-{int(time.time())}"  # unique name
+    worker_id = f"push-{int(time.time())}"
 
     context = zmq.Context()
     socket = context.socket(zmq.DEALER)
@@ -70,7 +78,7 @@ if __name__ == "__main__":
 
                     print(f"Push worker {worker_id} executing task {task_id}")
 
-                    def callback(result_tuple, tid=task_id):  # Capture task_id here!
+                    def callback(result_tuple, tid=task_id):  # Capture task_id
                         status, result = result_tuple
                         result = result.replace("\n", "")
                         socket.send_multipart(

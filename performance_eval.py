@@ -1,26 +1,25 @@
-"""
-MPCSFaaS Performance Evaluation Client
+# MPCSFaaS Performance Evaluation Client
 
-Evaluates performance of local, pull, and push dispatcher modes.
+# Evaluates performance of local, pull, and push dispatcher modes.
 
-Metrics:
-- Latency: Time from task submission to result retrieval
-- Throughput: Tasks completed per second
-- Overhead: Comparison against local baseline
+# Metrics:
+# - Latency: Time from task submission to result retrieval
+# - Throughput: Tasks completed per second
+# - Overhead: Comparison against local baseline
 
-Experiments:
-1. Single task latency (no-op and sleep tasks)
-2. Throughput under load (concurrent tasks)
-3. Weak scaling study (tasks scale with workers)
+# Experiments:
+# 1. Single task latency (no-op and sleep tasks)
+# 2. Throughput under load (concurrent tasks)
+# 3. Weak scaling study (tasks scale with workers)
 
-Usage:
-    python3 performance_eval.py --mode [local|pull|push|all] --experiment [latency|throughput|scaling|all]
+# Usage:
+#     python3 performance_eval.py --mode [local|pull|push|all] --experiment [latency|throughput|scaling|all]
 
-Examples:
-    python3 performance_eval.py --mode all --experiment all
-    python3 performance_eval.py --mode pull --experiment latency --tasks 10
-    python3 performance_eval.py --mode push --experiment scaling --max-workers 8
-"""
+# Examples:
+#     python3 performance_eval.py --mode all --experiment all
+#     python3 performance_eval.py --mode pull --experiment latency --tasks 10
+#     python3 performance_eval.py --mode push --experiment scaling --max-workers 8
+
 
 import requests
 import dill
@@ -28,16 +27,12 @@ import codecs
 import time
 import sys
 import argparse
-import json
 import statistics
-import csv
-from datetime import datetime
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import List, Dict, Tuple, Callable, Any
 
 # ============== Configuration ==============
 SERVER_URL = "http://127.0.0.1:8000"
-RESULTS_DIR = "performance_results"
 
 # Default experiment parameters
 DEFAULT_TASK_COUNT = 20
@@ -49,8 +44,7 @@ TASK_TIMEOUT = 60  # seconds
 
 
 def sleep_function(duration):
-    """Sleep function - simulates work"""
-    import time  # Move import inside function
+    import time
 
     time.sleep(duration)
     return f"slept for {duration}s"
@@ -66,42 +60,40 @@ def deserialize(s: str):
 
 # ============== Test Functions ==============
 def noop_function(x):
-    """No-op function - returns immediately"""
     return x
 
 
+# CPU-bound function - computes sum of squares
 def cpu_function(n):
-    """CPU-bound function - computes sum of squares"""
     total = 0
     for i in range(n):
         total += i * i
     return total
 
 
+# Memory-bound function - allocates and processes data
 def memory_function(size_kb):
-    """Memory-bound function - allocates and processes data"""
     data = [i for i in range(size_kb * 128)]  # ~1KB per 128 ints
     return sum(data)
 
 
 # ============== FaaS Client ==============
+# Performance testing client for MPCSFaaS
 class PerfClient:
-    """Performance testing client for MPCSFaaS"""
 
     def __init__(self, server_url: str = SERVER_URL):
         self.server_url = server_url
         self.registered_functions: Dict[str, str] = {}  # fn_name -> fn_id
 
     def health_check(self) -> bool:
-        """Check if service is running"""
         try:
             response = requests.get(f"{self.server_url}/", timeout=5)
             return response.status_code == 200
         except:
             return False
 
+    # Register a function, caching the ID
     def register_function(self, fn: Callable) -> str:
-        """Register a function, caching the ID"""
         fn_name = fn.__name__
 
         if fn_name in self.registered_functions:
@@ -109,13 +101,10 @@ class PerfClient:
 
         serialized = serialize(fn)
         response = requests.post(
-            f"{self.server_url}/register_function/",
+            f"{self.server_url}/register_function",
             json={
-                "id": "perf_test",
                 "name": fn_name,
                 "payload": serialized,
-                "functionMethod": "python",
-                "params": [],
             },
         )
         response.raise_for_status()
@@ -124,18 +113,17 @@ class PerfClient:
         self.registered_functions[fn_name] = fn_id
         return fn_id
 
+    # Execute a function and return task_id
     def execute_function(self, fn_id: str, args: Any) -> str:
-        """Execute a function and return task_id"""
         payload = serialize(args)
         response = requests.post(
-            f"{self.server_url}/execute_function/",
+            f"{self.server_url}/execute_function",
             json={"function_id": fn_id, "payload": payload},
         )
         response.raise_for_status()
         return response.json()["task_id"]
 
     def get_result(self, task_id: str) -> Tuple[str, Any]:
-        """Get task result, returns (status, result)"""
         response = requests.get(f"{self.server_url}/result/{task_id}")
         response.raise_for_status()
         data = response.json()
@@ -144,10 +132,6 @@ class PerfClient:
     def wait_for_result(
         self, task_id: str, timeout: float = TASK_TIMEOUT
     ) -> Tuple[float, str, Any]:
-        """
-        Wait for task completion.
-        Returns (elapsed_time, status, result)
-        """
         start_time = time.time()
 
         while True:
@@ -158,17 +142,15 @@ class PerfClient:
             status, result = self.get_result(task_id)
 
             if status in ["COMPLETE", "COMPLETED"]:
-                return elapsed, "COMPLETE", result
+                return elapsed, "COMPLETED", result
             elif status == "FAILED":
                 return elapsed, "FAILED", result
 
             time.sleep(POLL_INTERVAL)
 
+    # Run a single task end-to-end.
     def run_task(self, fn: Callable, args: Any) -> Dict:
-        """
-        Run a single task end-to-end.
-        Returns dict with timing info.
-        """
+
         # Register (cached)
         reg_start = time.time()
         fn_id = self.register_function(fn)
@@ -194,10 +176,11 @@ class PerfClient:
             "total_time": total_time,
         }
 
+    # Run multiple tasks concurrently
     def run_tasks_concurrent(
         self, fn: Callable, args_list: List[Any], max_concurrent: int = 10
     ) -> List[Dict]:
-        """Run multiple tasks concurrently"""
+
         # Pre-register function
         fn_id = self.register_function(fn)
 
@@ -232,14 +215,13 @@ class PerfClient:
 
 
 # ============== Experiment Classes ==============
+# Measure single-task latency for different task types
 class LatencyExperiment:
-    """Measure single-task latency for different task types"""
 
     def __init__(self, client: PerfClient):
         self.client = client
 
     def run(self, num_trials: int = 10) -> Dict:
-        """Run latency experiments"""
         print("\n" + "=" * 60)
         print("LATENCY EXPERIMENT")
         print("=" * 60)
@@ -304,7 +286,7 @@ class LatencyExperiment:
         return self._summarize(results)
 
     def _summarize(self, results: Dict) -> Dict:
-        """Calculate summary statistics"""
+
         summary = {}
 
         print("\n" + "-" * 60)
@@ -317,7 +299,7 @@ class LatencyExperiment:
 
         for task_type, trials in results.items():
             times = [
-                t["total_time"] * 1000 for t in trials if t["status"] == "COMPLETE"
+                t["total_time"] * 1000 for t in trials if t["status"] == "COMPLETED"
             ]
 
             if times:
@@ -345,14 +327,14 @@ class LatencyExperiment:
         return summary
 
 
+# Measure throughput under concurrent load
 class ThroughputExperiment:
-    """Measure throughput under concurrent load"""
 
     def __init__(self, client: PerfClient):
         self.client = client
 
     def run(self, task_counts: List[int] = None) -> Dict:
-        """Run throughput experiments"""
+
         if task_counts is None:
             task_counts = [5, 10, 20, 50, 100]
 
@@ -375,8 +357,8 @@ class ThroughputExperiment:
             task_results = self.client.run_tasks_concurrent(noop_function, args_list)
             total_time = time.time() - start_time
 
-            successful = [r for r in task_results if r["status"] == "COMPLETE"]
-            failed = [r for r in task_results if r["status"] != "COMPLETE"]
+            successful = [r for r in task_results if r["status"] == "COMPLETED"]
+            failed = [r for r in task_results if r["status"] != "COMPLETED"]
 
             throughput = len(successful) / total_time if total_time > 0 else 0
             avg_latency = (
@@ -403,7 +385,7 @@ class ThroughputExperiment:
         return results
 
     def _print_summary(self, results: Dict):
-        """Print throughput summary table"""
+
         print("\n" + "-" * 60)
         print("THROUGHPUT SUMMARY")
         print("-" * 60)
@@ -419,116 +401,15 @@ class ThroughputExperiment:
             )
 
 
-class WeakScalingExperiment:
-    """
-    Weak scaling study: increase tasks proportionally with workers
-
-    Note: This requires manually starting different numbers of workers
-    for each trial. The experiment will prompt for worker count.
-    """
-
-    def __init__(self, client: PerfClient):
-        self.client = client
-
-    def run(
-        self,
-        tasks_per_worker: int = DEFAULT_TASKS_PER_WORKER,
-        worker_counts: List[int] = None,
-    ) -> Dict:
-        """Run weak scaling experiment"""
-        if worker_counts is None:
-            worker_counts = [1, 2, 4, 8]
-
-        print("\n" + "=" * 60)
-        print("WEAK SCALING EXPERIMENT")
-        print("=" * 60)
-        print(f"Tasks per worker: {tasks_per_worker}")
-        print("\nThis experiment requires manually adjusting worker count.")
-        print("For each trial, ensure the correct number of workers are running.\n")
-
-        results = {}
-
-        for num_workers in worker_counts:
-            num_tasks = num_workers * tasks_per_worker
-
-            print(f"\n--- Trial: {num_workers} worker(s), {num_tasks} tasks ---")
-            input(f"Press Enter when {num_workers} worker(s) are running...")
-
-            # Warm up
-            self.client.run_task(noop_function, 1)
-            time.sleep(0.5)
-
-            # Run tasks
-            args_list = list(range(num_tasks))
-
-            start_time = time.time()
-            task_results = self.client.run_tasks_concurrent(
-                sleep_function, [0.1] * num_tasks
-            )
-            total_time = time.time() - start_time
-
-            successful = [r for r in task_results if r["status"] == "COMPLETE"]
-
-            throughput = len(successful) / total_time if total_time > 0 else 0
-            avg_latency = (
-                statistics.mean([r["total_time"] for r in successful])
-                if successful
-                else 0
-            )
-
-            # Ideal time if perfectly parallel
-            ideal_time = (num_tasks / num_workers) * 0.1  # sleep duration
-            efficiency = ideal_time / total_time if total_time > 0 else 0
-
-            results[num_workers] = {
-                "num_workers": num_workers,
-                "num_tasks": num_tasks,
-                "successful": len(successful),
-                "total_time_s": total_time,
-                "ideal_time_s": ideal_time,
-                "throughput_tps": throughput,
-                "avg_latency_ms": avg_latency * 1000,
-                "efficiency": efficiency,
-            }
-
-            print(f"  Completed: {len(successful)}/{num_tasks}")
-            print(f"  Total time: {total_time:.2f}s (ideal: {ideal_time:.2f}s)")
-            print(f"  Throughput: {throughput:.2f} tasks/sec")
-            print(f"  Efficiency: {efficiency*100:.1f}%")
-
-        self._print_summary(results)
-        return results
-
-    def _print_summary(self, results: Dict):
-        """Print scaling summary"""
-        print("\n" + "-" * 70)
-        print("WEAK SCALING SUMMARY")
-        print("-" * 70)
-        print(
-            f"{'Workers':<10} {'Tasks':<10} {'Time (s)':<12} {'Ideal (s)':<12} "
-            f"{'Throughput':<12} {'Efficiency':<12}"
-        )
-        print("-" * 70)
-
-        for num_workers, data in sorted(results.items()):
-            print(
-                f"{num_workers:<10} {data['num_tasks']:<10} {data['total_time_s']:<12.2f} "
-                f"{data['ideal_time_s']:<12.2f} {data['throughput_tps']:<12.2f} "
-                f"{data['efficiency']*100:<11.1f}%"
-            )
-
-
+# Automated scaling study without manual worker adjustment
+# Uses fixed worker setup and varies task count
 class AutoScalingExperiment:
-    """
-    Automated scaling study without manual worker adjustment.
-    Uses fixed worker setup and varies task count.
-    """
 
     def __init__(self, client: PerfClient):
         self.client = client
 
     def run(self, task_counts: List[int] = None) -> Dict:
-        """Run automated scaling experiment"""
+
         if task_counts is None:
             task_counts = [5, 10, 20, 40, 80]
 
@@ -555,7 +436,7 @@ class AutoScalingExperiment:
             )
             total_time = time.time() - start_time
 
-            successful = len([r for r in task_results if r["status"] == "COMPLETE"])
+            successful = len([r for r in task_results if r["status"] == "COMPLETED"])
             throughput = successful / total_time if total_time > 0 else 0
 
             results["noop"][count] = {
@@ -578,7 +459,7 @@ class AutoScalingExperiment:
             )
             total_time = time.time() - start_time
 
-            successful = len([r for r in task_results if r["status"] == "COMPLETE"])
+            successful = len([r for r in task_results if r["status"] == "COMPLETED"])
             throughput = successful / total_time if total_time > 0 else 0
 
             # Calculate effective parallelism
@@ -606,7 +487,7 @@ class AutoScalingExperiment:
         return results
 
     def _print_summary(self, results: Dict):
-        """Print summary"""
+
         print("\n" + "-" * 70)
         print("SCALING SUMMARY - Sleep Tasks")
         print("-" * 70)
@@ -623,23 +504,6 @@ class AutoScalingExperiment:
                 f"{data['throughput_tps']:<15.2f} "
                 f"{data['effective_parallelism']:<11.1f}x"
             )
-
-
-# ============== Results Export ==============
-def export_results(results: Dict, mode: str, experiment: str):
-    """Export results to CSV and JSON"""
-    import os
-
-    os.makedirs(RESULTS_DIR, exist_ok=True)
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-
-    # JSON export
-    json_file = f"{RESULTS_DIR}/{mode}_{experiment}_{timestamp}.json"
-    with open(json_file, "w") as f:
-        json.dump(results, f, indent=2, default=str)
-    print(f"\nResults saved to {json_file}")
-
-    return json_file
 
 
 # ============== Main ==============
@@ -679,7 +543,6 @@ def main():
     parser.add_argument(
         "--server", default=SERVER_URL, help=f"Server URL (default: {SERVER_URL})"
     )
-    parser.add_argument("--export", action="store_true", help="Export results to files")
 
     args = parser.parse_args()
 
@@ -730,19 +593,10 @@ def main():
             results = experiment.run(task_counts=args.tasks)
             all_results["throughput"] = results
 
-        elif exp == "scaling":
-            experiment = WeakScalingExperiment(client)
-            results = experiment.run(tasks_per_worker=args.tasks_per_worker)
-            all_results["scaling"] = results
-
         elif exp == "auto-scaling":
             experiment = AutoScalingExperiment(client)
             results = experiment.run(task_counts=args.tasks)
             all_results["auto_scaling"] = results
-
-    # Export results
-    if args.export:
-        export_results(all_results, args.mode, args.experiment)
 
     print("\n" + "=" * 60)
     print("PERFORMANCE EVALUATION COMPLETE")

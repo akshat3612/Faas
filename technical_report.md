@@ -1,4 +1,4 @@
-# Technical Report: Function-as-a-Service (FaaS) Platform
+# MPCSFaaS Technical Report
 
 **Authors:** Akshat Singhania & Linn Oberbeck  
 **Date:** December 3 2025
