@@ -86,7 +86,7 @@ async def root():
 
 
 # register new function by storing serialized payload in redis
-@app.post("/register_function/")
+@app.post("/register_function")
 async def register_function(function: RequestFunction):
 
     # redis connection

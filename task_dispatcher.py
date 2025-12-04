@@ -46,7 +46,7 @@ HEARTBEAT_CHECK_INTERVAL = 1  # How often to check for dead workers
 class TaskStatus(str, Enum):
     QUEUED = "QUEUED"
     RUNNING = "RUNNING"
-    COMPLETE = "COMPLETE"
+    COMPLETE = "COMPLETED"
     FAILED = "FAILED"
 
 

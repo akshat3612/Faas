@@ -1,8 +1,7 @@
 # Technical Report: Function-as-a-Service (FaaS) Platform
 
 **Authors:** Akshat Singhania & Linn Oberbeck  
-**Course:** Distributed Systems, University of Chicago  
-**Date:** December 2025
+**Date:** December 3 2025
 
 
 ## Executive Summary
@@ -12,14 +11,16 @@ This report describes the design and implementation of a distributed Function-as
 **Key Features:**
 - RESTful API for function registration and execution
 - Three dispatcher modes (Local, Pull, Push) for different workload patterns
-- Redis-backed persistent storage for tasks and functions
+- Redis-backed persistent storage for tasks and functions using Pub-Sub model
 - ZeroMQ-based worker-dispatcher communication
-- Fault-tolerant worker management with failure detection
+- Fault-tolerant worker management with failure detection [using fixed intervals and heartbeat checks]
 - Serialization-based function and result transmission using Dill
 
 ---
 
 ## System Architecture
+
+![Architecture Screenshot](FaaS_Architecture_Screenshot.png){width=50%}
 
 ### High-Level Overview
 
